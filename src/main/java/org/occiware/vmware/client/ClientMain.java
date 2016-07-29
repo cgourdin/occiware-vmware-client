@@ -1,14 +1,14 @@
 /**
  * Copyright (c) 2016 Inria
- *  
+ *
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
  * which accompanies this distribution, and is available at
  * http://www.eclipse.org/legal/epl-v10.html
- * 
+ *
  * Contributors:
  * - Christophe Gourdin <christophe.gourdin@inria.fr>
- * 
+ *
  */
 package org.occiware.vmware.client;
 
@@ -18,11 +18,19 @@ import com.vmware.vim25.DynamicProperty;
 import com.vmware.vim25.FileInfo;
 import com.vmware.vim25.FileQuery;
 import com.vmware.vim25.FileQueryFlags;
+import com.vmware.vim25.GuestDiskInfo;
+import com.vmware.vim25.GuestInfo;
 import com.vmware.vim25.GuestNicInfo;
 import com.vmware.vim25.HostDatastoreBrowserSearchResults;
 import com.vmware.vim25.HostDatastoreBrowserSearchSpec;
+import com.vmware.vim25.HostDhcpService;
 import com.vmware.vim25.HostDiskDimensionsChs;
+import com.vmware.vim25.HostNetworkInfo;
+import com.vmware.vim25.HostVirtualNic;
+import com.vmware.vim25.HostVirtualNicSpec;
 import com.vmware.vim25.InvalidProperty;
+import com.vmware.vim25.NetDhcpConfigInfo;
+import com.vmware.vim25.NetDhcpConfigInfoDhcpOptions;
 import com.vmware.vim25.RuntimeFault;
 import com.vmware.vim25.TaskInfo;
 import com.vmware.vim25.VirtualAHCIController;
@@ -39,6 +47,7 @@ import com.vmware.vim25.VirtualHardware;
 import com.vmware.vim25.VirtualIDEController;
 import com.vmware.vim25.VirtualMachineConfigInfo;
 import com.vmware.vim25.VirtualMachineQuickStats;
+import com.vmware.vim25.VirtualMachineToolsStatus;
 import com.vmware.vim25.VirtualPCNet32;
 import com.vmware.vim25.VirtualSCSIController;
 import com.vmware.vim25.VirtualVmxnet;
@@ -78,7 +87,7 @@ public class ClientMain {
 
     public static void main(String[] args) {
         String url = "https://" + SERVER_NAME + "/sdk";
-        // List host systems
+        
         try {
             ServiceInstance si = new ServiceInstance(new URL(url), USER_NAME, PASSWORD, true);
             System.out.println("Vcenter Name:" + si.getAboutInfo().name);
@@ -90,6 +99,39 @@ public class ClientMain {
                 System.out.println("Network of the host : " + net.getName());
             }
 
+            HostNetworkInfo info = host.getConfig().getNetwork();
+            if (info != null) {
+                if (info.getDhcp() != null) {
+                    for (HostDhcpService service : info.getDhcp()) {
+                        String subnetAddr = service.getSpec().getIpSubnetAddr();
+                        String subnetMask = service.getSpec().getIpSubnetMask();
+                        String vswitch = service.getSpec().getVirtualSwitch();
+                        System.out.println("Host : " + HOSTNAME);
+                        System.out.println("VSwitch : " + vswitch);
+                        System.out.println("Subnetmask : " + subnetMask);
+                        System.out.println("subnetAddr = " + subnetAddr);
+                    }
+                }
+
+                if (info.getConsoleVnic() != null) {
+                    HostVirtualNic[] vnics = info.getConsoleVnic();
+                    for (HostVirtualNic vnic : vnics) {
+                        String device = vnic.getDevice();
+                        String key = vnic.getKey();
+                        String port = vnic.getPort();
+                        String portGroup = vnic.getPortgroup();
+                        HostVirtualNicSpec nicSpec = vnic.getSpec();
+
+                        System.out.println("Device: " + device);
+                        System.out.println("key: " + key);
+                        System.out.println("port: " + port);
+                        System.out.println("Port group : " + portGroup);
+                        if (nicSpec != null) {
+                            System.out.println("Nic spec: " + nicSpec.toString());
+                        }
+                    }
+                }
+            }
             ManagedEntity[] managedEntities = new InventoryNavigator(host).searchManagedEntities("VirtualMachine");
 
             for (int i = 0; i < managedEntities.length; i++) {
@@ -487,6 +529,23 @@ public class ClientMain {
                                 ipAddressPlainLocal += ipAddress + ";";
                             }
                         }
+                        boolean dhcp = true;
+                        NetDhcpConfigInfo dhcpConfig = nicInfo.getIpConfig().getDhcp();
+                        if (dhcpConfig == null) {
+                            System.out.println("dhcp config is null !!!!");
+                        } else {
+                            NetDhcpConfigInfoDhcpOptions options = dhcpConfig.getIpv4();
+                            if (options == null) {
+                                System.out.println("options is null !!!");
+                            } else {
+                                dhcp = options.isEnable();
+                                if (dhcp) {
+                                    System.out.println("dhcp enabled");
+                                } else {
+                                    System.out.println("dhcp disabled");
+                                }
+                            }
+                        }
 
                     }
                 }
@@ -515,6 +574,7 @@ public class ClientMain {
 
             }
         }
+
         // Check if vm is a template.
         if (vm.getConfig().isTemplate()) {
             System.out.println("This virtual machine is a template !!!");
@@ -525,9 +585,37 @@ public class ClientMain {
         String guestState = vm.getGuest().getGuestState();
         String vmState = vm.getSummary().getRuntime().getPowerState().name();
         String overallStatus = vm.getOverallStatus().name();
-        System.out.println("Guest state : " + guestState);
+        System.out.println("Guest state : " + guestState);        
         System.out.println("VM State : " + vmState);
         System.out.println("Overall status: " + overallStatus);
+        
+        System.out.println("---------------------------------------");
+        System.out.println("Guest system information");
+        System.out.println("---------------------------------------");
+        if (vm.getGuest().getToolsStatus().equals(VirtualMachineToolsStatus.toolsOk)) {
+            System.out.println("System has vmware tools installed and running.");
+            GuestInfo vmGuestInfo = vm.getGuest();
+            
+            System.out.println("App State : " + vmGuestInfo.getAppState());
+            GuestDiskInfo[] gDiskInfo = vmGuestInfo.getDisk();
+            if (gDiskInfo != null) {
+                for (GuestDiskInfo info : gDiskInfo) {
+                    Long capacity = info.getCapacity();
+                    Long freespace = info.getFreeSpace();
+                    String diskPath = info.getDiskPath();
+                    System.out.println("disk storage capacity (from guest os) : " + capacity);
+                    System.out.println("disk storage freespace : " + freespace);
+                    System.out.println("disk storage path : " + diskPath);
+                    
+                }
+            }
+            
+            System.out.println("Hostname : " + vmGuestInfo.getHostName());
+            
+            
+        }
+        
+        
     }
 
 }
